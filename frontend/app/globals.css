@@ -1,0 +1,138 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Theme tokens.
+ *
+ * Defined as CSS variables rather than Tailwind classes so that the dark
+ * variant is a single block of overrides instead of a `dark:` prefix on every
+ * element. The palette is intentionally low-chroma: the only saturated colour
+ * in the UI is the accent and the three validation states, which keeps a
+ * warning badge genuinely attention-grabbing.
+ */
+:root {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  --surface: 250 251 253;
+  --surface-raised: 255 255 255;
+  --surface-sunken: 243 245 248;
+  --border: 219 224 232;
+  --text: 34 38 47;
+  --text-muted: 103 120 145;
+  --accent: 27 111 245;
+}
+
+.dark {
+  --surface: 17 20 26;
+  --surface-raised: 25 29 37;
+  --surface-sunken: 13 16 21;
+  --border: 45 52 65;
+  --text: 232 236 242;
+  --text-muted: 148 161 180;
+  --accent: 89 176 255;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: rgb(var(--surface));
+    color: rgb(var(--text));
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* A visible focus ring is a requirement, not a nicety: this app is fully
+     operable by keyboard, including choosing a destination. */
+  :focus-visible {
+    outline: 2px solid rgb(var(--accent));
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: rgb(var(--border));
+    border-radius: 999px;
+    border: 3px solid rgb(var(--surface));
+  }
+}
+
+@layer components {
+  .surface {
+    background-color: rgb(var(--surface-raised));
+    border: 1px solid rgb(var(--border));
+  }
+
+  .sunken {
+    background-color: rgb(var(--surface-sunken));
+  }
+
+  .muted {
+    color: rgb(var(--text-muted));
+  }
+
+  .card {
+    @apply surface rounded-xl;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium;
+    background-color: rgb(var(--surface-sunken));
+    color: rgb(var(--text-muted));
+    border: 1px solid rgb(var(--border));
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2
+           text-sm font-medium transition-colors disabled:cursor-not-allowed
+           disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn text-white;
+    background-color: rgb(var(--accent));
+  }
+  .btn-primary:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+
+  .btn-ghost {
+    @apply btn;
+    color: rgb(var(--text-muted));
+    border: 1px solid rgb(var(--border));
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background-color: rgb(var(--surface-sunken));
+    color: rgb(var(--text));
+  }
+
+  /* Estimated prices are marked everywhere they appear. The dotted underline
+     is the visual cue that a number is modelled rather than quoted. */
+  .estimate {
+    border-bottom: 1px dotted rgb(var(--text-muted));
+    cursor: help;
+  }
+}
+
+/* Respect a user's reduced-motion setting: this UI animates a lot while the
+   agents work, which is exactly the sort of movement that causes problems. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
