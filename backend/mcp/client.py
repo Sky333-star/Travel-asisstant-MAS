@@ -310,7 +310,116 @@ class MCPConnection:
         return await asyncio.wait_for(future, timeout=settings.mcp_tool_timeout + 30)
 
 
+class MCPManager:
+    """Owns every MCP connection and exposes a single ``call`` entry point."""
 
+    def __init__(self) -> None:
+        self.connections: dict[str, MCPConnection] = {}
+        self._started = False
+
+    async def startup(self) -> dict[str, str]:
+        """Start all enabled servers concurrently. Returns name -> state."""
+        if self._started:
+            return self.status()
+
+        specs = enabled_specs()
+        self.connections = {spec.name: MCPConnection(spec) for spec in specs}
+
+        results = await asyncio.gather(
+            *(conn.start() for conn in self.connections.values()),
+            return_exceptions=True,
+        )
+        for (name, conn), outcome in zip(self.connections.items(), results, strict=False):
+            if isinstance(outcome, Exception):
+                conn.state = ServerState.FAILED
+                conn.error = str(outcome)
+                logger.error("MCP server '%s' raised during startup: %s", name, outcome)
+
+        self._started = True
+        ready = [n for n, c in self.connections.items() if c.state == ServerState.READY]
+        failed = [n for n, c in self.connections.items() if c.state != ServerState.READY]
+        logger.info(
+            "MCP startup complete. Ready: %s%s",
+            ", ".join(ready) or "none",
+            f" | Failed: {', '.join(failed)}" if failed else "",
+        )
+        return self.status()
+
+    async def shutdown(self) -> None:
+        await asyncio.gather(
+            *(conn.stop() for conn in self.connections.values()), return_exceptions=True
+        )
+        self.connections.clear()
+        self._started = False
+
+    def status(self) -> dict[str, str]:
+        return {name: conn.state.value for name, conn in self.connections.items()}
+
+    def is_ready(self, server: str) -> bool:
+        conn = self.connections.get(server)
+        return conn is not None and conn.state == ServerState.READY
+
+    def available_tools(self) -> dict[str, list[str]]:
+        return {
+            name: list(conn.tools)
+            for name, conn in self.connections.items()
+            if conn.state == ServerState.READY
+        }
+
+    async def call(
+        self,
+        server: str,
+        tool: str,
+        arguments: dict[str, Any] | None = None,
+        *,
+        default: Any = None,
+        raise_on_error: bool = False,
+    ) -> Any:
+        """Call an MCP tool with tracing, metrics and a safe default.
+
+        Args:
+            server: Registry name of the server.
+            tool: Tool name.
+            arguments: Tool arguments.
+            default: Returned when the call fails and ``raise_on_error`` is
+                false. This is the mechanism that lets an agent lose one data
+                source and still produce a plan.
+            raise_on_error: Raise :class:`MCPError` instead of returning
+                ``default``. Used where the data is genuinely load-bearing.
+        """
+        arguments = arguments or {}
+        conn = self.connections.get(server)
+
+        if conn is None:
+            message = f"MCP server '{server}' is not enabled."
+            if raise_on_error:
+                raise MCPError(message, server, tool)
+            logger.warning(message)
+            return default
+
+        started = time.perf_counter()
+        with span(
+            f"mcp.{server}.{tool}",
+            **{"mcp.server": server, "mcp.tool": tool,
+               "mcp.arg_keys": ",".join(sorted(arguments.keys()))},
+        ) as current:
+            try:
+                result = await conn.call(tool, arguments)
+                elapsed = time.perf_counter() - started
+                record_mcp_call(server, tool, elapsed, True)
+                current.set_attribute("mcp.ok", True)
+                current.set_attribute("mcp.duration_ms", round(elapsed * 1000, 2))
+                return result
+            except (TimeoutError, MCPError, Exception) as exc:
+                elapsed = time.perf_counter() - started
+                record_mcp_call(server, tool, elapsed, False)
+                current.set_attribute("mcp.ok", False)
+                current.set_attribute("mcp.error", str(exc)[:300])
+                logger.warning("MCP %s.%s failed after %.2fs: %s",
+                               server, tool, elapsed, exc)
+                if raise_on_error:
+                    raise MCPError(str(exc), server, tool) from exc
+                return default
 
 
 # Process-wide manager, started and stopped by the FastAPI lifespan.
